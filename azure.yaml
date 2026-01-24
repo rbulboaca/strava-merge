@@ -1,10 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
-name: todo-python-mongo-swa-func
-metadata:
-  template: todo-python-mongo-swa-func@0.0.1-beta
+name: strava-merge
 workflows:
-  up: 
+  up:
     steps:
       - azd: provision
       - azd: deploy --all
@@ -15,25 +13,28 @@ services:
     language: js
     host: staticwebapp
     hooks:
-      # Creates a temporary `.env.local` file for the build command. Vite will automatically use it during build.
-      # The expected/required values are mapped to the infrastructure outputs.
-      # .env.local is ignored by git, so it will not be committed if, for any reason, if deployment fails.
-      # see: https://vitejs.dev/guide/env-and-mode
-      # Note: Notice that dotenv must be a project dependency for this to work. See package.json.
       prepackage:
         windows:
           shell: pwsh
-          run: 'echo "VITE_API_BASE_URL=""$env:API_BASE_URL""" > .env.local ; echo "VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=""$env:APPLICATIONINSIGHTS_CONNECTION_STRING""" >> .env.local'
+          run: |
+            echo "VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=""$env:APPLICATIONINSIGHTS_CONNECTION_STRING""" > .env.local
+            (Get-Content staticwebapp.config.json) -replace '__AAD_TENANT_ID__', $env:AZURE_TENANT_ID | Set-Content staticwebapp.config.json
         posix:
           shell: sh
-          run: 'echo VITE_API_BASE_URL=\"$API_BASE_URL\" > .env.local && echo VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=\"$APPLICATIONINSIGHTS_CONNECTION_STRING\" >> .env.local'    
+          run: |
+            echo VITE_APPLICATIONINSIGHTS_CONNECTION_STRING=\"$APPLICATIONINSIGHTS_CONNECTION_STRING\" > .env.local
+            sed -i.bak "s/__AAD_TENANT_ID__/$AZURE_TENANT_ID/g" staticwebapp.config.json && rm -f staticwebapp.config.json.bak
       postdeploy:
         windows:
           shell: pwsh
-          run: 'rm .env.local'
+          run: |
+            rm .env.local
+            git checkout staticwebapp.config.json 2>$null
         posix:
           shell: sh
-          run: 'rm .env.local'
+          run: |
+            rm .env.local
+            git checkout staticwebapp.config.json 2>/dev/null || true
   api:
     project: ./src/api
     language: py

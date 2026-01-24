@@ -11,11 +11,11 @@
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
     },
-    "useAPIM": {
-      "value": "${USE_APIM=false}"
+    "aadClientId": {
+      "value": "${AAD_CLIENT_ID}"
     },
-    "apimSku": {
-      "value": "${APIM_SKU=Consumption}"
+    "aadClientSecret": {
+      "value": "${AAD_CLIENT_SECRET}"
     }
   }
 }

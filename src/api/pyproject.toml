@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "todo"
 version = "0.1.0"
-description = "Simple Todo API"
+description = "Strava Merge API"
 license = "MIT"
 packages = [
     { include = "todo" },

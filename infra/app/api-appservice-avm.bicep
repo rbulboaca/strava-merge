@@ -56,3 +56,4 @@ module api 'br/public:avm/res/web/site:0.6.0' = {
 output SERVICE_API_IDENTITY_PRINCIPAL_ID string = api.outputs.systemAssignedMIPrincipalId
 output SERVICE_API_NAME string = api.outputs.name
 output SERVICE_API_URI string = 'https://${api.outputs.defaultHostname}'
+output SERVICE_API_RESOURCE_ID string = api.outputs.resourceId

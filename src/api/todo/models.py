@@ -27,7 +27,7 @@ class Settings(BaseSettings):
                 )
 
     AZURE_COSMOS_CONNECTION_STRING: str = ""
-    AZURE_COSMOS_DATABASE_NAME: str = "Todo"
+    AZURE_COSMOS_DATABASE_NAME: str = "strava_merge"
     AZURE_KEY_VAULT_ENDPOINT: Optional[str] = None
     APPLICATIONINSIGHTS_CONNECTION_STRING: Optional[str] = None
     APPLICATIONINSIGHTS_ROLENAME: Optional[str] = "API"

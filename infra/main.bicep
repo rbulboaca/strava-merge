@@ -9,10 +9,7 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
-// Optional parameters to override the default azd resource naming conventions. Update the main.parameters.json file to provide values. e.g.,:
-// "resourceGroupName": {
-//      "value": "myGroupName"
-// }
+// Optional parameters to override the default azd resource naming conventions. Update the main.parameters.json file to provide values.
 param apiServiceName string = ''
 param applicationInsightsDashboardName string = ''
 param applicationInsightsName string = ''
@@ -23,21 +20,20 @@ param logAnalyticsName string = ''
 param resourceGroupName string = ''
 param storageAccountName string = ''
 param webServiceName string = ''
-param apimServiceName string = ''
-
-@description('Flag to use Azure API Management to mediate the calls between the Web frontend and the backend API')
-param useAPIM bool = false
-
-@description('API Management SKU to use if APIM is enabled')
-param apimSku string = 'Consumption'
 
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
+@description('Azure AD Application (client) ID for authentication')
+param aadClientId string = ''
+
+@secure()
+@description('Azure AD Application client secret for authentication')
+param aadClientSecret string = ''
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = { 'azd-env-name': environmentName }
-var webUri = 'https://${web.outputs.defaultHostname}'
 
 // Organize resources in a resource group
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
@@ -46,7 +42,7 @@ resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
   tags: tags
 }
 
-// The application frontend
+// The application frontend (Standard tier for custom auth)
 module web 'br/public:avm/res/web/static-site:0.3.0' = {
   name: 'staticweb'
   scope: rg
@@ -54,7 +50,21 @@ module web 'br/public:avm/res/web/static-site:0.3.0' = {
     name: !empty(webServiceName) ? webServiceName : '${abbrs.webStaticSites}web-${resourceToken}'
     location: location
     provider: 'Custom'
+    sku: 'Standard'
     tags: union(tags, { 'azd-service-name': 'web' })
+  }
+}
+
+// Configure SWA: linked backend + Azure AD app settings
+module swaConfig './app/swa-config.bicep' = {
+  name: 'swa-config'
+  scope: rg
+  params: {
+    swaName: web.outputs.name
+    backendResourceId: api.outputs.SERVICE_API_RESOURCE_ID
+    location: location
+    aadClientId: aadClientId
+    aadClientSecret: aadClientSecret
   }
 }
 
@@ -69,10 +79,9 @@ module api './app/api-appservice-avm.bicep' = {
     kind: 'functionapp'
     appServicePlanId: appServicePlan.outputs.resourceId
     appSettings: {
-      API_ALLOW_ORIGINS: webUri
       AZURE_COSMOS_CONNECTION_STRING_KEY: cosmos.outputs.connectionStringKey
       AZURE_COSMOS_DATABASE_NAME: cosmos.outputs.databaseName
-      AZURE_KEY_VAULT_ENDPOINT:keyVault.outputs.uri
+      AZURE_KEY_VAULT_ENDPOINT: keyVault.outputs.uri
       AZURE_COSMOS_ENDPOINT: 'https://${cosmos.outputs.databaseName}.documents.azure.com:443/'
       FUNCTIONS_EXTENSION_VERSION: '~4'
       FUNCTIONS_WORKER_RUNTIME: 'python'
@@ -82,7 +91,7 @@ module api './app/api-appservice-avm.bicep' = {
     siteConfig: {
       linuxFxVersion: 'python|3.10'
     }
-    allowedOrigins: [ webUri ]
+    allowedOrigins: []
     storageAccountResourceId: storage.outputs.resourceId
     clientAffinityEnabled: false
   }
@@ -153,8 +162,8 @@ module storage 'br/public:avm/res/storage/storage-account:0.8.3' = {
     name: !empty(storageAccountName) ? storageAccountName : '${abbrs.storageStorageAccounts}${resourceToken}'
     allowBlobPublicAccess: true
     dnsEndpointType: 'Standard'
-    publicNetworkAccess:'Enabled'
-    networkAcls:{
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
       bypass: 'AzureServices'
       defaultAction: 'Allow'
     }
@@ -192,52 +201,6 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.1.0' = {
   }
 }
 
-// Creates Azure API Management (APIM) service to mediate the requests between the frontend and the backend API
-module apim 'br/public:avm/res/api-management/service:0.2.0' = if (useAPIM) {
-  name: 'apim-deployment'
-  scope: rg
-  params: {
-    name: !empty(apimServiceName) ? apimServiceName : '${abbrs.apiManagementService}${resourceToken}'
-    publisherEmail: 'noreply@microsoft.com'
-    publisherName: 'n/a'
-    location: location
-    tags: tags
-    sku: apimSku
-    skuCount: 0
-    zones: []
-    customProperties: {}
-    loggers: [
-      {
-        name: 'app-insights-logger'
-        credentials: {
-          instrumentationKey: monitoring.outputs.applicationInsightsInstrumentationKey
-        }
-        loggerDescription: 'Logger to Azure Application Insights'
-        isBuffered: false
-        loggerType: 'applicationInsights'
-        targetResourceId: monitoring.outputs.applicationInsightsResourceId
-      }
-    ]
-  }
-}
-
-//Configures the API settings for an api app within the Azure API Management (APIM) service.
-module apimApi 'br/public:avm/ptn/azd/apim-api:0.1.0' = if (useAPIM) {
-  name: 'apim-api-deployment'
-  scope: rg
-  params: {
-    apiBackendUrl: api.outputs.SERVICE_API_URI
-    apiDescription: 'This is a simple Todo API'
-    apiDisplayName: 'Simple Todo API'
-    apiName: 'todo-api'
-    apiPath: 'todo'
-    name: useAPIM ? apim.outputs.name : ''
-    webFrontendUrl: webUri
-    location: location
-    apiAppName: api.outputs.SERVICE_API_NAME
-  }
-}
-
 // Data outputs
 output AZURE_COSMOS_CONNECTION_STRING_KEY string = cosmos.outputs.connectionStringKey
 output AZURE_COSMOS_DATABASE_NAME string = cosmos.outputs.databaseName
@@ -248,7 +211,5 @@ output AZURE_KEY_VAULT_ENDPOINT string = keyVault.outputs.uri
 output AZURE_KEY_VAULT_NAME string = keyVault.outputs.name
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
-output API_BASE_URL string = useAPIM ? apimApi.outputs.serviceApiUri : api.outputs.SERVICE_API_URI
-output REACT_APP_WEB_BASE_URL string = webUri
-output USE_APIM bool = useAPIM
-output SERVICE_API_ENDPOINTS array = useAPIM ? [ apimApi.outputs.serviceApiUri, api.outputs.SERVICE_API_URI ]: []
+output SERVICE_API_URI string = api.outputs.SERVICE_API_URI
+output REACT_APP_WEB_BASE_URL string = 'https://${web.outputs.defaultHostname}'

@@ -6,26 +6,8 @@ param keyVaultResourceId string
 param connectionStringKey string = 'AZURE-COSMOS-CONNECTION-STRING'
 param collections array = [
   {
-    name: 'TodoList'
-    id: 'TodoList'
-    shardKey: {
-      keys: [
-        'Hash'
-      ]
-    }
-    indexes: [
-      {
-        key: {
-          keys: [
-            '_id'
-          ]
-        }
-      }
-    ]
-  }
-  {
-    name: 'TodoItem'
-    id: 'TodoItem'
+    name: 'user_tokens'
+    id: 'user_tokens'
     shardKey: {
       keys: [
         'Hash'
@@ -43,7 +25,7 @@ param collections array = [
   }
 ]
 
-var defaultDatabaseName = 'Todo'
+var defaultDatabaseName = 'strava_merge'
 var actualDatabaseName = !empty(cosmosDatabaseName) ? cosmosDatabaseName : defaultDatabaseName
 
 module cosmos 'br/public:avm/res/document-db/database-account:0.6.0' = {
