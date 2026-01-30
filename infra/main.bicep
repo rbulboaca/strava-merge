@@ -10,16 +10,16 @@ param environmentName string
 param location string
 
 // Optional parameters to override the default azd resource naming conventions. Update the main.parameters.json file to provide values.
-param apiServiceName string = ''
 param applicationInsightsDashboardName string = ''
 param applicationInsightsName string = ''
-param appServicePlanName string = ''
 param cosmosAccountName string = ''
 param keyVaultName string = ''
 param logAnalyticsName string = ''
 param resourceGroupName string = ''
-param storageAccountName string = ''
 param webServiceName string = ''
+param containerRegistryName string = ''
+param containerAppsEnvironmentName string = ''
+param containerAppName string = ''
 
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
@@ -61,39 +61,85 @@ module swaConfig './app/swa-config.bicep' = {
   scope: rg
   params: {
     swaName: web.outputs.name
-    backendResourceId: api.outputs.SERVICE_API_RESOURCE_ID
+    backendResourceId: containerApp.outputs.resourceId
     location: location
     aadClientId: aadClientId
     aadClientSecret: aadClientSecret
   }
 }
 
-// The application backend
-module api './app/api-appservice-avm.bicep' = {
-  name: 'api'
+// Container Registry for storing Docker images
+module containerRegistry 'br/public:avm/res/container-registry/registry:0.3.1' = {
+  name: 'containerregistry'
   scope: rg
   params: {
-    name: !empty(apiServiceName) ? apiServiceName : '${abbrs.webSitesAppService}api-${resourceToken}'
+    name: !empty(containerRegistryName) ? containerRegistryName : '${abbrs.containerRegistryRegistries}${resourceToken}'
     location: location
     tags: tags
-    kind: 'functionapp'
-    appServicePlanId: appServicePlan.outputs.resourceId
-    appSettings: {
-      AZURE_COSMOS_CONNECTION_STRING_KEY: cosmos.outputs.connectionStringKey
-      AZURE_COSMOS_DATABASE_NAME: cosmos.outputs.databaseName
-      AZURE_KEY_VAULT_ENDPOINT: keyVault.outputs.uri
-      AZURE_COSMOS_ENDPOINT: 'https://${cosmos.outputs.databaseName}.documents.azure.com:443/'
-      FUNCTIONS_EXTENSION_VERSION: '~4'
-      FUNCTIONS_WORKER_RUNTIME: 'python'
-      SCM_DO_BUILD_DURING_DEPLOYMENT: true
+    acrSku: 'Basic'
+    acrAdminUserEnabled: true
+  }
+}
+
+// Container Apps Environment
+module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.5.2' = {
+  name: 'containerappsenvironment'
+  scope: rg
+  params: {
+    name: !empty(containerAppsEnvironmentName) ? containerAppsEnvironmentName : '${abbrs.appManagedEnvironments}${resourceToken}'
+    location: location
+    tags: tags
+    logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+  }
+}
+
+// Container App for the API
+module containerApp 'br/public:avm/res/app/container-app:0.4.1' = {
+  name: 'containerapp'
+  scope: rg
+  params: {
+    name: !empty(containerAppName) ? containerAppName : '${abbrs.appContainerApps}api-${resourceToken}'
+    location: location
+    tags: union(tags, { 'azd-service-name': 'api' })
+    environmentResourceId: containerAppsEnvironment.outputs.resourceId
+    managedIdentities: {
+      systemAssigned: true
     }
-    appInsightResourceId: monitoring.outputs.applicationInsightsResourceId
-    siteConfig: {
-      linuxFxVersion: 'python|3.10'
+    containers: [
+      {
+        name: 'api'
+        image: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+        resources: {
+          cpu: '0.5'
+          memory: '1Gi'
+        }
+        env: [
+          { name: 'AZURE_COSMOS_CONNECTION_STRING_KEY', value: cosmos.outputs.connectionStringKey }
+          { name: 'AZURE_COSMOS_DATABASE_NAME', value: cosmos.outputs.databaseName }
+          { name: 'AZURE_KEY_VAULT_ENDPOINT', value: keyVault.outputs.uri }
+          { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: monitoring.outputs.applicationInsightsConnectionString }
+        ]
+      }
+    ]
+    registries: [
+      {
+        server: containerRegistry.outputs.loginServer
+        username: containerRegistry.outputs.name
+        passwordSecretRef: 'acr-password'
+      }
+    ]
+    secrets: {
+      secureList: [
+        {
+          name: 'acr-password'
+          value: containerRegistry.outputs.name
+        }
+      ]
     }
-    allowedOrigins: []
-    storageAccountResourceId: storage.outputs.resourceId
-    clientAffinityEnabled: false
+    ingressTargetPort: 3100
+    ingressExternal: true
+    scaleMinReplicas: 0
+    scaleMaxReplicas: 1
   }
 }
 
@@ -110,7 +156,7 @@ module accessKeyVault 'br/public:avm/res/key-vault/vault:0.5.1' = {
     sku: 'standard'
     accessPolicies: [
       {
-        objectId: api.outputs.SERVICE_API_IDENTITY_PRINCIPAL_ID
+        objectId: containerApp.outputs.systemAssignedMIPrincipalId
         permissions: {
           secrets: [ 'get', 'list' ]
         }
@@ -134,41 +180,6 @@ module cosmos './app/db-avm.bicep' = {
     location: location
     tags: tags
     keyVaultResourceId: keyVault.outputs.resourceId
-  }
-}
-
-// Create an App Service Plan to group applications under the same payment plan and SKU
-module appServicePlan 'br/public:avm/res/web/serverfarm:0.1.1' = {
-  name: 'appserviceplan'
-  scope: rg
-  params: {
-    name: !empty(appServicePlanName) ? appServicePlanName : '${abbrs.webServerFarms}${resourceToken}'
-    sku: {
-      name: 'Y1'
-      tier: 'Dynamic'
-    }
-    location: location
-    tags: tags
-    reserved: true
-    kind: 'Linux'
-  }
-}
-
-// Backing storage for Azure functions backend API
-module storage 'br/public:avm/res/storage/storage-account:0.8.3' = {
-  name: 'storage'
-  scope: rg
-  params: {
-    name: !empty(storageAccountName) ? storageAccountName : '${abbrs.storageStorageAccounts}${resourceToken}'
-    allowBlobPublicAccess: true
-    dnsEndpointType: 'Standard'
-    publicNetworkAccess: 'Enabled'
-    networkAcls: {
-      bypass: 'AzureServices'
-      defaultAction: 'Allow'
-    }
-    location: location
-    tags: tags
   }
 }
 
@@ -211,5 +222,6 @@ output AZURE_KEY_VAULT_ENDPOINT string = keyVault.outputs.uri
 output AZURE_KEY_VAULT_NAME string = keyVault.outputs.name
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = tenant().tenantId
-output SERVICE_API_URI string = api.outputs.SERVICE_API_URI
+output SERVICE_API_URI string = 'https://${containerApp.outputs.fqdn}'
 output REACT_APP_WEB_BASE_URL string = 'https://${web.outputs.defaultHostname}'
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.outputs.loginServer

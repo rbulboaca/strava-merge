@@ -38,4 +38,4 @@ services:
   api:
     project: ./src/api
     language: py
-    host: function
+    host: containerapp

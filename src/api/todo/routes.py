@@ -1,16 +1,17 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from starlette.requests import Request
 import requests
 from stravalib import Client
 import xml.etree.ElementTree as ET
 
-from .app import app
 from .models import Activity, MergeRequest, UserToken, Settings
 
 settings = Settings()
+
+router = APIRouter(prefix="/api")
 
 async def get_strava_client(user_id: str = "user1"):  # For simplicity, fixed user
     token = await UserToken.find_one(UserToken.user_id == user_id)
@@ -19,7 +20,7 @@ async def get_strava_client(user_id: str = "user1"):  # For simplicity, fixed us
     client = Client(access_token=token.access_token, refresh_token=token.refresh_token, token_expires=token.expires_at)
     return client
 
-@app.get("/auth/url")
+@router.get("/auth/url")
 async def get_auth_url():
     client_id = settings.STRAVA_CLIENT_ID
     redirect_uri = settings.STRAVA_REDIRECT_URI or "http://localhost:3100/auth/callback"
@@ -27,7 +28,7 @@ async def get_auth_url():
     url = f"https://www.strava.com/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}"
     return {"url": url}
 
-@app.get("/auth/callback")
+@router.get("/auth/callback")
 async def auth_callback_get(code: str):
     client_id = settings.STRAVA_CLIENT_ID
     client_secret = settings.STRAVA_CLIENT_SECRET
@@ -52,7 +53,7 @@ async def auth_callback_get(code: str):
         await token_doc.insert()
     return {"status": "authenticated"}
 
-@app.get("/auth/status")
+@router.get("/auth/status")
 async def auth_status():
     user_id = "user1"
     token = await UserToken.find_one(UserToken.user_id == user_id)
@@ -60,7 +61,7 @@ async def auth_status():
         return {"authenticated": True}
     return {"authenticated": False}
 
-@app.get("/activities", response_model=List[Activity])
+@router.get("/activities", response_model=List[Activity])
 async def get_activities(client: Client = Depends(get_strava_client)):
     activities = client.get_activities(after=datetime.now() - timedelta(days=30))  # Last 30 days
     return [Activity(
@@ -87,7 +88,7 @@ async def get_activities(client: Client = Depends(get_strava_client)):
         has_kudoed=a.has_kudoed
     ) for a in activities[:50]]  # Limit to 50
 
-@app.post("/merge")
+@router.post("/merge")
 async def merge_activities(request: MergeRequest, client: Client = Depends(get_strava_client)):
     if len(request.activity_ids) < 2:
         raise HTTPException(status_code=400, detail="At least 2 activities required")

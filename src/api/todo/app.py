@@ -14,7 +14,7 @@ app = FastAPI(
     description="Strava Activity Merger API",
     version="2.0.0",
     title="Strava Merge API",
-    docs_url="/",
+    docs_url="/api",
 )
 
 if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
@@ -29,7 +29,8 @@ if settings.APPLICATIONINSIGHTS_CONNECTION_STRING:
     FastAPIInstrumentor.instrument_app(app, tracer_provider=tracerProvider)
 
 
-from . import routes  # NOQA
+from .routes import router
+app.include_router(router)
 
 @app.on_event("startup")
 async def startup_event():
